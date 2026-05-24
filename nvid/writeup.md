@@ -64,7 +64,7 @@ Jadi formatnya: `CBC{` + **16 bytes payload** + `}` = 21 karakter total.
 
 ### Cari CUDA Code di dalam PE
 
-`cuobjdump` tidak menemukan device code langsung di exe karena CUDA-nya pakai custom loader (bukan `__cudaRegisterFatBinary` standar). Kita cari fatbin magic bytes secara manual:
+`cuobjdump` tidak menemukan device code langsung di exe karena CUDA-nya pakai custom loader (bukan `__cudaRegisterFatBinary` standar). Saya cari fatbin magic bytes secara manual:
 
 ```python
 # fatbin magic: 0xBA55ED50
@@ -93,9 +93,9 @@ Kernel bernama `check_key`, menerima pointer ke input dan pointer ke output.
 
 ### Temukan Constant Bank 3
 
-Ini bagian yang bikin kita pusing cukup lama. Kita awalnya kira constant bank 3 ada di `.data` section PE (`0x42e00`). Memang ada 4 expected values di sana (`0xc0dac0da` dst), tapi banyak "XOR key" di offset lebih tinggi terlihat seperti device pointer (`0x4002ef10`, `0x40032258`), bukan konstanta crypto.
+Ini bagian yang bikin saya pusing cukup lama. Saya awalnya kira constant bank 3 ada di `.data` section PE (`0x42e00`). Memang ada 4 expected values di sana (`0xc0dac0da` dst), tapi banyak "XOR key" di offset lebih tinggi terlihat seperti device pointer (`0x4002ef10`, `0x40032258`), bukan konstanta crypto.
 
-Setelah menggali lebih dalam, kita cek section-section di dalam ELF kernel:
+Setelah menggali lebih dalam, saya cek section-section di dalam ELF kernel:
 
 ```python
 # List semua section dari kernel ELF
@@ -144,7 +144,7 @@ Untuk word A, packed word di-XOR dengan `0xb00b800b`:
 x = packed ^ 0xb00b800b
 ```
 
-**Catatan penting:** Word B, C, D **tidak** di-XOR dengan `0xb00b800b` sebelum masuk chain. Ini salah satu bug yang cukup lama kita debug.
+**Catatan penting:** Word B, C, D **tidak** di-XOR dengan `0xb00b800b` sebelum masuk chain. Ini salah satu bug yang cukup lama saya debug.
 
 ### Step 3 — 6 Putaran Rotate + XOR
 
@@ -197,25 +197,25 @@ Proses solve ini tidak mulus. Berikut rangkuman kegagalan yang terjadi:
 
 ### ❌ Kegagalan 1 — Constant Bank Salah
 
-Awalnya kita baca constant bank dari `.data` section PE di offset `0x42e00`. Di sana memang ada expected values yang benar, tapi XOR keys-nya terlihat seperti device pointer (`0x4002ef10`) bukan nilai crypto.
+Awalnya saya baca constant bank dari `.data` section PE di offset `0x42e00`. Di sana memang ada expected values yang benar, tapi XOR keys-nya terlihat seperti device pointer (`0x4002ef10`) bukan nilai crypto.
 
 Ternyata `.data[0x42e00]` itu cuma sebagian data — constant bank 3 yang sesungguhnya ada di **section `.nv.constant3` dalam ELF kernel**, bukan di PE host.
 
 ### ❌ Kegagalan 2 — Logika Invers Salah
 
-Setelah dapat constant bank yang benar, verifikasi forward pass sudah OK tapi `unpack` masih salah karena analisis manual PRMT tentang "free bytes" keliru. Kita sempat kira byte ke-1 dari setiap word tidak dipakai (free), padahal empirical test membuktikan mapping-nya 1:1.
+Setelah dapat constant bank yang benar, verifikasi forward pass sudah OK tapi `unpack` masih salah karena analisis manual PRMT tentang "free bytes" keliru. Saya sempat kira byte ke-1 dari setiap word tidak dipakai (free), padahal empirical test membuktikan mapping-nya 1:1.
 
 ### ❌ Kegagalan 3 — XOR 0xb00b800b Diterapkan ke Semua Word
 
-Kita terlalu cepat mengasumsikan semua 4 word melewati `^ 0xb00b800b` sebelum chain XOR. Padahal dari SASS, hanya word A yang di-XOR `0xb00b800b` — word B/C/D langsung di-XOR dengan output word sebelumnya tanpa XOR awal ini.
+Saya terlalu cepat mengasumsikan semua 4 word melewati `^ 0xb00b800b` sebelum chain XOR. Padahal dari SASS, hanya word A yang di-XOR `0xb00b800b` — word B/C/D langsung di-XOR dengan output word sebelumnya tanpa XOR awal ini.
 
-Ini terungkap ketika kita perhatikan bahwa inversion word A menghasilkan `Cc_u` (printable), tapi word B tetap non-printable. Saat dicoba tanpa `0xb00b800b` untuk word B, langsung dapat `V_dA` yang printable.
+Ini terungkap ketika saya perhatikan bahwa inversion word A menghasilkan `Cc_u` (printable), tapi word B tetap non-printable. Saat dicoba tanpa `0xb00b800b` untuk word B, langsung dapat `V_dA` yang printable.
 
 ### ❌ Kegagalan 4 — Shift Index Assignment Salah untuk Word C dan D
 
-Walaupun word A dan B sudah benar, word C dan D tetap non-printable karena kita salah mapping shift index.
+Walaupun word A dan B sudah benar, word C dan D tetap non-printable karena saya salah mapping shift index.
 
-Kita awalnya guess `sh_C = [0x7e, 0x7d, 0x82, 0x7f, 0x80, 0x81]` berdasarkan asumsi non-sequential. Ternyata yang benar adalah **sequential**:
+Saya awalnya guess `sh_C = [0x7e, 0x7d, 0x82, 0x7f, 0x80, 0x81]` berdasarkan asumsi non-sequential. Ternyata yang benar adalah **sequential**:
 - `sh_C = [0x7c, 0x7d, 0x7e, 0x7f, 0x80, 0x81]`
 - `sh_D = [0x82, 0x83, 0x84, 0x85, 0x86, 0x87]`
 
@@ -286,6 +286,4 @@ CBC{Cc_uV_dAa___GPU!}
 - **Python** — ekstraksi konstanta, simulasi kernel, inversion solver
 - **binwalk** — bantu temukan fatbin dalam PE
 
----
 
-*Writeup by: odilia | Challenge: nvid (RE) | CBC{Cc_uV_dAa___GPU!}*
